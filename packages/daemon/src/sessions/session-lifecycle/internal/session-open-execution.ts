@@ -400,6 +400,7 @@ export async function completeOpenCommand(params: {
     appBundleId: sessionAppBundleId,
     appName,
     deviceClaim,
+    bootedByOpen: preparedSelection?.bootOccurred === true,
   });
   sessionStore.clearCloseEffectsUnconfirmed(nextRef);
   const nextSession = sessionStore.requireCurrent(nextRef);
