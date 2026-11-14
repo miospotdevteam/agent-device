@@ -63,6 +63,7 @@ const handleSessionCloseCommandGroup: SessionCommandHandler = (params) =>
     platformServices: params.platformServices,
     bindDevice: params.bindDevice,
     platformResourceCleanup: params.platformResourceCleanup,
+    deviceShutdownDenied: params.deviceShutdownDenied,
   } satisfies SessionCloseCommandInput);
 
 const handleSessionObservabilityCommandGroup: SessionCommandHandler = async ({
@@ -275,5 +276,6 @@ export async function handleSessionCommands(
     throwIfCanceled,
     reconcileOrphanedDeviceClaim,
     platformResourceCleanup,
+    deviceShutdownDenied: params.deviceShutdownDenied,
   });
 }
