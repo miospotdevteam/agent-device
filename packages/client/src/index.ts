@@ -271,10 +271,12 @@ export function createAgentDeviceClient(
         const session = resolveRequestSession(options);
         try {
           const data = await executeCommand<Record<string, unknown>>('close', options);
+          const warnings = readResponseWarnings(data);
           return {
             session,
             shutdown: normalizeTargetShutdownResult(data.shutdown),
             provider: asOptionalRecord(data.provider),
+            ...(warnings.length > 0 ? { warnings } : {}),
             savedScript: readOptionalString(data, 'savedScript'),
             ...readScriptDeliveryDisclosure(data),
             identifiers: { session },
@@ -379,10 +381,12 @@ export function createAgentDeviceClient(
       close: async (options: AppCloseOptions = {}) => {
         const session = resolveRequestSession(options);
         const data = await executeCommand<Record<string, unknown>>('close', options);
+        const warnings = readResponseWarnings(data);
         return {
           session,
           closedApp: options.app,
           shutdown: normalizeTargetShutdownResult(data.shutdown),
+          ...(warnings.length > 0 ? { warnings } : {}),
           savedScript: readOptionalString(data, 'savedScript'),
           ...readScriptDeliveryDisclosure(data),
           identifiers: { session },
