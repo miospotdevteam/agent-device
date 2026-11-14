@@ -271,6 +271,10 @@ export async function completeOpenCommand(params: {
   const shouldRelaunch = req.flags?.relaunch === true;
   let sessionAppBundleId = appBundleId;
   const openCommandStartedAtMs = Date.now();
+  const preparedSelection = markSelectionBootOccurred(
+    selection,
+    lifecycle.owner.kind === 'local-family',
+  );
 
   const provisionalSession = await prepareOpenDispatchSession({
     req,
@@ -281,6 +285,7 @@ export async function completeOpenCommand(params: {
     sessionAppBundleId,
     appName,
     existingRef,
+    bootedByOpen: preparedSelection?.bootOccurred === true,
   });
   if (provisionalSession.type === 'response') return provisionalSession;
   const openDispatchRef = provisionalSession.ref;
@@ -325,7 +330,6 @@ export async function completeOpenCommand(params: {
     });
   sessionAppBundleId = outcome.appBundleId ?? sessionAppBundleId;
   const timing: OpenTiming = { ...outcome.timing };
-  const preparedSelection = markSelectionBootOccurred(selection);
   const startupSample = openTarget
     ? buildStartupPerfSample(openStartedAtMs, openTarget, sessionAppBundleId)
     : undefined;
@@ -434,12 +438,16 @@ async function prepareOpenDispatchSession(params: {
   sessionAppBundleId: string | undefined;
   appName: string | undefined;
   existingRef: SessionRef | undefined;
+  bootedByOpen: boolean;
 }): Promise<
   { type: 'session'; ref?: SessionRef } | { type: 'response'; response: DaemonResponse }
 > {
   const { req, sessionName, sessionStore, existingRef } = params;
   const beforeDispatch = req.internal?.openLifecycle?.beforeDispatch;
-  if (!beforeDispatch) return { type: 'session', ref: existingRef };
+  if (!beforeDispatch) {
+    if (existingRef) sessionStore.updateOpenDevice(existingRef, params.device, params.bootedByOpen);
+    return { type: 'session', ref: existingRef };
+  }
   const ref = publishOpenSession({
     req,
     sessionName,
@@ -449,6 +457,7 @@ async function prepareOpenDispatchSession(params: {
     surface: params.surface,
     appBundleId: params.sessionAppBundleId,
     appName: params.appName,
+    bootedByOpen: params.bootedByOpen,
   });
   const lifecycleResponse = await beforeDispatch();
   if (lifecycleResponse && !lifecycleResponse.ok)
