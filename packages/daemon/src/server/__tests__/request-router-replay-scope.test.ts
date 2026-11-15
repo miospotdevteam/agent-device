@@ -47,6 +47,8 @@ import {
 import { awaitFixtureReadiness } from '../../__tests__/support/application-lifecycle-runtime-fixture.ts';
 import { parseDaemonPolicy } from '@agent-device/daemon-contracts/daemon-policy-file';
 import { platformResourceCleanupFixture } from '../../__tests__/support/platform-resource-cleanup-fixture.ts';
+import { readResponseWarnings } from '@agent-device/kernel/success-text';
+import { toReplayTestAttemptOutcome } from '@agent-device/replay-port/session-test-outcome';
 
 const mockResolveTargetDevice = vi.mocked(getResolveTargetDeviceMock());
 const mockAwaitFixtureReadiness = vi.mocked(awaitFixtureReadiness);
@@ -62,45 +64,53 @@ beforeEach(() => {
   mockAwaitFixtureReadiness.mockResolvedValue(undefined);
 });
 
-test('same-session replay close preserves a denied implicit shutdown without consuming retention', async () => {
-  const root = mkdtempForTestSync('agent-device-replay-close-policy-');
-  const replayPath = path.join(root, 'close.ad');
-  fs.writeFileSync(replayPath, 'close\n');
-  const sessionStore = makeSessionStore('agent-device-replay-close-policy-');
-  sessionStore.publish(
-    'default',
-    makeIosSession('default', { bootedByOpen: true, appBundleId: 'com.example.app' }),
-  );
-  const cleanup = platformResourceCleanupFixture();
-  const handler = createRequestHandler({
-    host: createTestHostEnvironment(),
-    createCommandSurface: testCreateCommandSurface,
-    logPath: path.join(root, 'daemon.log'),
-    token: 'test-token',
-    sessionStore,
-    leaseRegistry: new LeaseRegistry(),
-    deviceRuntimeGateway: lifecycleDeviceRuntimeGateway,
-    deviceInventoryGateways: createTestDeviceInventoryGateways(),
-    platformResourceCleanup: cleanup,
-    daemonPolicy: parseDaemonPolicy(
-      { version: 1, capabilities: { deny: ['device-shutdown'] } },
-      path.join(root, 'policy.json'),
-    ),
-    trackDownloadableArtifact: () => 'artifact-id',
-  });
-  const response = await handler({
-    token: 'test-token',
-    session: 'default',
-    command: 'replay',
-    positionals: [replayPath],
-    meta: { cwd: root, requestId: 'replay-close-policy', sessionExplicit: true },
-  });
-  expect(response).toMatchObject({ ok: true });
-  expect(cleanup.retainExecutionHostAfterClose).toHaveBeenCalledWith(
-    expect.objectContaining({ shutdownRequested: false }),
-  );
-  expect(sessionStore.listRefs()).toHaveLength(0);
-});
+test.each([false, true])(
+  'same-session replay close preserves denied-stop warnings (later failure: %s)',
+  async (laterFailure) => {
+    const root = mkdtempForTestSync('agent-device-replay-close-policy-');
+    const replayPath = path.join(root, 'close.ad');
+    fs.writeFileSync(replayPath, laterFailure ? 'close\napp-switcher\n' : 'close\n');
+    const sessionStore = makeSessionStore('agent-device-replay-close-policy-');
+    sessionStore.publish(
+      'default',
+      makeIosSession('default', { bootedByOpen: true, appBundleId: 'com.example.app' }),
+    );
+    const cleanup = platformResourceCleanupFixture();
+    const handler = createRequestHandler({
+      host: createTestHostEnvironment(),
+      createCommandSurface: testCreateCommandSurface,
+      logPath: path.join(root, 'daemon.log'),
+      token: 'test-token',
+      sessionStore,
+      leaseRegistry: new LeaseRegistry(),
+      deviceRuntimeGateway: lifecycleDeviceRuntimeGateway,
+      deviceInventoryGateways: createTestDeviceInventoryGateways(),
+      platformResourceCleanup: cleanup,
+      daemonPolicy: parseDaemonPolicy(
+        { version: 1, capabilities: { deny: ['device-shutdown'] } },
+        path.join(root, 'policy.json'),
+      ),
+      trackDownloadableArtifact: () => 'artifact-id',
+    });
+    const response = await handler({
+      token: 'test-token',
+      session: 'default',
+      command: 'replay',
+      positionals: [replayPath],
+      meta: { cwd: root, requestId: 'replay-close-policy', sessionExplicit: true },
+    });
+    expect(response.ok).toBe(!laterFailure);
+    const warnings = readResponseWarnings(response.ok ? response.data : response.error.details);
+    expect(warnings).toEqual([
+      "This session's open booted this device and close would stop it, but this daemon's policy denies device-shutdown. The device is still running.",
+    ]);
+    expect(toReplayTestAttemptOutcome(response).warnings).toEqual(warnings);
+    expect(cleanup.retainExecutionHostAfterClose).toHaveBeenCalledWith(
+      expect.objectContaining({ shutdownRequested: false }),
+    );
+    expect(sessionStore.listRefs()).toHaveLength(0);
+  },
+);
 
 test('replay runs active-session actions inside the parent request provider scope', async () => {
   const root = mkdtempForTestSync('agent-device-replay-scope-');

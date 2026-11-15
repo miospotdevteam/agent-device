@@ -21,6 +21,7 @@ import type {
   ReplaySessionStore,
 } from '@agent-device/contracts/replay-backend';
 import { errorResponse, type DaemonResponse } from '@agent-device/kernel/contracts';
+import { readResponseWarnings } from '@agent-device/kernel/success-text';
 
 /**
  * #1555 P5 (decomposition): the replay request's own orchestration — routing, plan resolution,
@@ -76,6 +77,7 @@ export async function runReplayCommand(command: ReplayCommand): Promise<DaemonRe
   // its own. Read below by the catch block, so a mid-loop exception still reports
   // the artifacts collected up to that point.
   const artifactPaths = new Set<string>();
+  const warnings: string[] = [];
   try {
     resolved = bundle.entry;
     if (isMaestroYamlPath(resolved) && req.flags?.replayBackend !== 'maestro') {
@@ -135,6 +137,7 @@ export async function runReplayCommand(command: ReplayCommand): Promise<DaemonRe
       ctx: stepContext,
       req,
       artifactPaths,
+      warnings,
       onStep,
       armSaveScript: sessionPreparation.armSaveScript,
     });
@@ -160,33 +163,64 @@ export async function runReplayCommand(command: ReplayCommand): Promise<DaemonRe
       // value. The fallback below is unreachable in practice (a response is
       // always recorded before any failure can be reported) and exists only
       // so this stays total.
-      return (
+      return withReplayActionWarnings(
         readLastResponse() ??
-        errorResponse('COMMAND_FAILED', 'replay step failed with no recorded response')
+          errorResponse('COMMAND_FAILED', 'replay step failed with no recorded response'),
+        warnings,
       );
     }
-    return completeReplayRun({
-      startedAt,
-      sessionName,
-      sessionStore,
-      replayed: outcome.replayed,
-      artifactPaths: outcome.artifactPaths,
-      snapshotDiagnosticSamples: outcome.snapshotDiagnosticSamples,
-      armSaveScript: sessionPreparation.armSaveScript,
-      coordinator,
-      keepSession,
-    });
+    return withReplayActionWarnings(
+      completeReplayRun({
+        startedAt,
+        sessionName,
+        sessionStore,
+        replayed: outcome.replayed,
+        artifactPaths: outcome.artifactPaths,
+        snapshotDiagnosticSamples: outcome.snapshotDiagnosticSamples,
+        armSaveScript: sessionPreparation.armSaveScript,
+        coordinator,
+        keepSession,
+      }),
+      warnings,
+    );
   } catch (error) {
     const normalized = normalizeError(error);
-    if (artifactPaths.size === 0) return { ok: false, error: normalized };
-    return {
-      ok: false,
-      error: {
-        ...normalized,
-        details: { ...normalized.details, artifactPaths: [...artifactPaths] },
+    return withReplayActionWarnings(
+      {
+        ok: false,
+        error: {
+          ...normalized,
+          ...(artifactPaths.size > 0
+            ? { details: { ...normalized.details, artifactPaths: [...artifactPaths] } }
+            : {}),
+        },
       },
+      warnings,
+    );
+  }
+}
+
+function withReplayActionWarnings(
+  response: DaemonResponse,
+  warnings: readonly string[],
+): DaemonResponse {
+  if (warnings.length === 0) return response;
+  if (response.ok) {
+    return {
+      ...response,
+      data: { ...response.data, warnings: [...warnings, ...readResponseWarnings(response.data)] },
     };
   }
+  return {
+    ...response,
+    error: {
+      ...response.error,
+      details: {
+        ...response.error.details,
+        warnings: [...warnings, ...readResponseWarnings(response.error.details)],
+      },
+    },
+  };
 }
 
 function completeReplayRun(params: {
