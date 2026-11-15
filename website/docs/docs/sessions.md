@@ -135,8 +135,9 @@ that agent-device created:
 agent-device close --shutdown
 ```
 
-When a shutdown result exists, `close` reports it in `data.shutdown`. The field is absent when the
-device stays running. If the daemon policy denies `device-shutdown`, `close --shutdown` fails with
+When a shutdown result exists, `close` reports it in `data.shutdown`. Check `shutdown.success` to
+see whether the stop succeeded. The field is omitted when no shutdown result is returned, including
+a plain close of a prebooted device or a policy-skipped implicit stop. If the daemon policy denies `device-shutdown`, `close --shutdown` fails with
 `UNAUTHORIZED` and `error.details.reason: DAEMON_POLICY_DENIED`. Plain `close` skips its implicit stop,
 succeeds, and reports the local simulator or emulator it left running in `warnings`.
 
