@@ -2,6 +2,8 @@ import type { LeaseRegistry } from '../../../resources/lease-registry.ts';
 import { inspectSessionLeaseRetainedOnClose } from '../../lease-lifecycle.ts';
 import type { CloseApplicationFinalizationResult } from '@agent-device/contracts/application-lifecycle-runtime';
 import type { TargetShutdownResult } from '@agent-device/contracts/device';
+import type { EnvMap } from '@agent-device/kernel/source-value';
+import { renewDeviceClaim } from '@agent-device/daemon-contracts/device-claims';
 import type { DaemonRequest } from '../../../core/daemon-request.ts';
 import type { OrdinaryCloseScript } from './session-close-script.ts';
 import type { SessionRef, SessionState } from '../../../core/session-state.ts';
@@ -42,6 +44,7 @@ export type SessionCloseTeardownResult = Readonly<{
 
 /** Runs owned resources, native close, native hint cleanup, and final lifecycle disposal. */
 export async function runSessionCloseTeardown(params: {
+  env: EnvMap;
   req: DaemonRequest;
   ref: SessionRef;
   logPath: string;
@@ -97,7 +100,10 @@ export async function runSessionCloseTeardown(params: {
   const implicitShutdown = !explicitShutdown && bootOwnedLocalStop;
   const implicitShutdownDeniedByPolicy = implicitShutdown && params.deviceShutdownDenied === true;
   const shutdownRequested =
-    explicitShutdown || (implicitShutdown && !implicitShutdownDeniedByPolicy);
+    explicitShutdown ||
+    (implicitShutdown &&
+      !implicitShutdownDeniedByPolicy &&
+      (await renewDeviceClaim(session.deviceClaim, params.env)).status === 'renewed');
   const retainExecutionHost = params.platformResourceCleanup.retainExecutionHostAfterClose({
     device: session.device,
     shutdownRequested,

@@ -441,6 +441,7 @@ async function runCloseTeardownAndRelease(params: {
     shutdownResult,
     implicitShutdownDeniedByPolicy,
   } = await runSessionCloseTeardown({
+    env: params.env,
     leaseRegistry,
     req,
     ref,

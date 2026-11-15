@@ -12,6 +12,10 @@ import {
 import { fakeCreateCommandSurface } from '../../../../__tests__/support/command-surface-fake.ts';
 import { lifecycleOperationsSpy } from '../../../../__tests__/support/lifecycle-operations-spy.ts';
 import { platformResourceCleanupFixture } from '../../../../__tests__/support/platform-resource-cleanup-fixture.ts';
+import {
+  acquireDeviceClaim,
+  inspectDeviceClaims,
+} from '@agent-device/daemon-contracts/device-claims';
 
 bindTestCommandHost();
 
@@ -50,6 +54,7 @@ async function closeSession(params: {
   sessionName: string;
   device: SessionState['device'];
   bootedByOpen?: true;
+  claim?: 'missing' | 'successor';
   flags?: Record<string, unknown>;
   deviceShutdownDenied?: boolean;
   lifecycleOperationsLoader?: Parameters<
@@ -58,12 +63,41 @@ async function closeSession(params: {
   platformResourceCleanup?: ReturnType<typeof platformResourceCleanupFixture>;
 }) {
   const { sessionName, device, bootedByOpen, flags } = params;
+  const host = createTestHostEnvironment({
+    env: { ...process.env, AGENT_DEVICE_CLAIMS_DIR: mkdtempForTestSync('implicit-close-claims-') },
+  });
   const sessionStore = makeSessionStore();
   const session = makeSession(sessionName, device);
   if (bootedByOpen) session.bootedByOpen = bootedByOpen;
+  if (bootedByOpen && params.claim !== 'missing') {
+    const claimInput = {
+      env: host.env,
+      device,
+      session: sessionName,
+      workspace: host.cwd,
+      stateDir: sessionStore.resolveDaemonStateDir(),
+      reconcileOrphanedDeviceClaim: async () => ({ status: 'reconciled' as const }),
+    };
+    const acquired = await acquireDeviceClaim(claimInput);
+    if (acquired.status !== 'acquired') throw new Error('Expected an owned device claim');
+    session.deviceClaim = acquired.ownership;
+    if (params.claim === 'successor') {
+      const prior = inspectDeviceClaims({}, host.env)[0]?.claim;
+      if (!prior) throw new Error('Expected the original claim');
+      const successor = await acquireDeviceClaim({
+        ...claimInput,
+        session: 'successor-session',
+        stateDir: path.join(sessionStore.resolveDaemonStateDir(), 'successor-state'),
+        observeDeviceBoot: {
+          observeBootTimeMs: async () => ({ observed: true, bootedAtMs: prior.updatedAtMs + 1 }),
+        },
+      });
+      expect(successor.status).toBe('acquired');
+    }
+  }
   sessionStore.publish(sessionName, session);
   const response = await handleSessionCommands({
-    host: createTestHostEnvironment(),
+    host,
     createCommandSurface: fakeCreateCommandSurface,
     platformServices: daemonPlatformServicesFixture(),
     ...(params.lifecycleOperationsLoader
@@ -85,8 +119,31 @@ async function closeSession(params: {
     sessionStore,
     invoke: noopInvoke,
   });
-  return { response, sessionStore };
+  return { response, sessionStore, claims: inspectDeviceClaims({}, host.env) };
 }
+
+test.each(['missing', 'successor'] as const)(
+  'plain close cannot stop a boot-owned device when its current claim is %s',
+  async (claim) => {
+    const { loader, finalizeApplicationClose } = lifecycleOperationsSpy();
+    const { response, sessionStore, claims } = await closeSession({
+      sessionName: 'lost-claim-session',
+      device: iosSimulator,
+      bootedByOpen: true,
+      claim,
+      lifecycleOperationsLoader: loader,
+    });
+    expect(response?.ok).toBe(true);
+    expect(finalizeApplicationClose).toHaveBeenCalledWith(
+      expect.objectContaining({ shutdownTarget: false }),
+    );
+    expect(mockShutdownTargetRuntime).not.toHaveBeenCalled();
+    expect(sessionStore.get('lost-claim-session')).toBeUndefined();
+    expect(claims.map((entry) => entry.claim?.session)).toEqual(
+      claim === 'successor' ? ['successor-session'] : [],
+    );
+  },
+);
 
 test.each([
   { label: 'iOS simulator', device: iosSimulator },
