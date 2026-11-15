@@ -11,7 +11,6 @@ import type {
   ReplaySessionStore,
 } from '@agent-device/contracts/replay-backend';
 import { readReplaySelectorDisplayValue } from '@agent-device/selectors';
-import { readResponseWarnings } from '@agent-device/kernel/success-text';
 import {
   type DaemonResponse,
   errorResponse,
@@ -247,6 +246,7 @@ export function createAdReplayStepRuntime(params: {
       collectReplayActionArtifactPaths(response).forEach((entry) => artifactPaths.add(entry));
       const ledger = [...artifactPaths];
       if (response.ok) {
+        const { readResponseWarnings } = await import('@agent-device/kernel/success-text');
         warnings.push(...readResponseWarnings(response.data));
         return { status: 'ok', artifactPaths: ledger };
       }

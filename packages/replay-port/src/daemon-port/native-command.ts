@@ -21,7 +21,6 @@ import type {
   ReplaySessionStore,
 } from '@agent-device/contracts/replay-backend';
 import { errorResponse, type DaemonResponse } from '@agent-device/kernel/contracts';
-import { readResponseWarnings } from '@agent-device/kernel/success-text';
 
 /**
  * #1555 P5 (decomposition): the replay request's own orchestration — routing, plan resolution,
@@ -163,13 +162,13 @@ export async function runReplayCommand(command: ReplayCommand): Promise<DaemonRe
       // value. The fallback below is unreachable in practice (a response is
       // always recorded before any failure can be reported) and exists only
       // so this stays total.
-      return withReplayActionWarnings(
+      return await withReplayActionWarnings(
         readLastResponse() ??
           errorResponse('COMMAND_FAILED', 'replay step failed with no recorded response'),
         warnings,
       );
     }
-    return withReplayActionWarnings(
+    return await withReplayActionWarnings(
       completeReplayRun({
         startedAt,
         sessionName,
@@ -185,7 +184,7 @@ export async function runReplayCommand(command: ReplayCommand): Promise<DaemonRe
     );
   } catch (error) {
     const normalized = normalizeError(error);
-    return withReplayActionWarnings(
+    return await withReplayActionWarnings(
       {
         ok: false,
         error: {
@@ -200,11 +199,12 @@ export async function runReplayCommand(command: ReplayCommand): Promise<DaemonRe
   }
 }
 
-function withReplayActionWarnings(
+async function withReplayActionWarnings(
   response: DaemonResponse,
   warnings: readonly string[],
-): DaemonResponse {
+): Promise<DaemonResponse> {
   if (warnings.length === 0) return response;
+  const { readResponseWarnings } = await import('@agent-device/kernel/success-text');
   if (response.ok) {
     return {
       ...response,
