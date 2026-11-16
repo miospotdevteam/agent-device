@@ -15,16 +15,13 @@ import {
  * toggle that has not rendered, a late effect), the confirmation disagrees, a busy indicator is on
  * screen, the producer or the presented surface changed, the broad-replacement floor is in force,
  * the capture still holds the baseline screen beside a new one, or the baseline may predate a side
- * effect. One failed check disarms the rule for the rest of the
- * run.
+ * effect. One failed check disarms the rule for the rest of the run.
  *
  * Two equal captures ~110 ms apart cannot exclude a later stage nothing marks: a toast standing in
  * for navigation, a plateau between transition stages, a late value write. That is the trade this
  * prototype measures.
  */
 export const ADAPTIVE_CONFIRMATION_GAP_MS = 110;
-
-export type AdaptiveConfirmation = ReturnType<typeof createAdaptiveConfirmation>;
 
 export function createAdaptiveConfirmation(params: {
   baseline: SurfaceScopedNodes | undefined;
