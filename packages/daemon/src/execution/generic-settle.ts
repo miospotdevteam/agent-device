@@ -90,16 +90,21 @@ export async function planGenericSettleObservation(
   if (!commandSupportsSettleObservation(params.command)) return {};
   const invalidSettleFlags = settleFlagGuardResponse(params.command, params.flags);
   if (invalidSettleFlags) return { response: invalidSettleFlags };
-  const settle = readSettleRequest(params.flags);
+  const settle = readSettleRequest(params.flags, params.sessionStore.host.env);
   if (!settle) return {};
   const { presentedSurface: _unverified, ...frame } = surfaceScopedNodes(
     refFrameTree(params.session),
   );
-  const baseline = await postActionBaseline({
-    frame,
-    candidates: [storedTreeBaseline(params.session.snapshot)],
-  });
-  return { observe: async () => await observeSettled(params, settle, baseline) };
+  const stored = storedTreeBaseline(params.session.snapshot);
+  const baseline = await postActionBaseline({ frame, candidates: [stored] });
+  // The stored tree describes the screen right before this action only while no side-effect seam
+  // has outdated it; the adaptive confirmation prototype trusts nothing else as a pre-action read.
+  const snapshot = params.session.snapshot;
+  const baselineFresh =
+    baseline === stored && snapshot !== undefined && !isOutdatedObservation(snapshot);
+  return {
+    observe: async () => await observeSettled(params, { ...settle, baselineFresh }, baseline),
+  };
 }
 
 /**
@@ -124,7 +129,7 @@ function storedTreeBaseline(snapshot: SnapshotState | undefined): SurfaceScopedN
  */
 async function observeSettled(
   context: GenericSettleContext,
-  settle: SettleParams,
+  settle: SettleParams & { baselineFresh: boolean },
   baseline: SurfaceScopedNodes,
 ): Promise<SettleObservation | undefined> {
   const runtime = await createGenericSettleRuntime(context);

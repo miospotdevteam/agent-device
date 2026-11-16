@@ -301,6 +301,12 @@ export type SettleTailEntry = {
 export type SettleParams = {
   quietMs?: number;
   timeoutMs?: number;
+  /**
+   * Internal prototype switch, never a CLI flag: 'adaptive' lets a baseline-differing capture that one
+   * short confirmation agrees with settle before the quiet window. The daemon sets it only when the
+   * host environment opts in (AGENT_DEVICE_SETTLE_ADAPTIVE=1).
+   */
+  confirmation?: 'adaptive';
 };
 
 /**

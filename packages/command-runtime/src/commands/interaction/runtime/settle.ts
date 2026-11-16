@@ -92,7 +92,7 @@ export async function settleAfterInteraction(
 ): Promise<SettleOutcome> {
   return await settleAfterAction(runtime, options, {
     ...params,
-    baseline: await resolveSettleBaseline(runtime, options, params.resolved),
+    ...(await resolveSettleBaseline(runtime, options, params.resolved)),
     actionPoint: params.resolved.point,
   });
 }
@@ -101,6 +101,11 @@ export type SettleObservationCommandOptions = CommandContext &
   SettleParams & {
     /** The pre-action tree the settled diff is taken against, and the surface it describes. */
     baseline: SurfaceScopedNodes;
+    /**
+     * Whether `baseline` describes the screen right before this action. Absent means it may predate
+     * a side effect, so the adaptive confirmation never treats a change against it as the action's.
+     */
+    baselineFresh?: boolean;
   };
 
 /**
@@ -133,7 +138,11 @@ export const settleObservationCommand: RuntimeCommand<
 async function settleAfterAction(
   runtime: AgentDeviceRuntime,
   options: CommandContext,
-  params: SettleParams & { baseline: SurfaceScopedNodes; actionPoint?: Point },
+  params: SettleParams & {
+    baseline: SurfaceScopedNodes;
+    baselineFresh?: boolean;
+    actionPoint?: Point;
+  },
 ): Promise<SettleOutcome> {
   // The loop resolves an unrequested window from the capture that pays it, so the window is only
   // known once one is taken. `base` carries the general default for the pre-capture shape the
@@ -154,6 +163,9 @@ async function settleAfterAction(
       timeoutMs,
       resetBudgetOnPrivateAxRecovery: true,
       broadTransitionBaseline: params.baseline,
+      ...(params.confirmation === 'adaptive'
+        ? { adaptiveConfirmation: { baselineFresh: params.baselineFresh === true } }
+        : {}),
     });
     if (outcome.failure) return settleUnavailable(base, outcome, outcome.failure.error);
     return await readSettledOutcome(runtime, options, params, base, outcome);
@@ -237,9 +249,10 @@ async function resolveSettleBaseline(
   runtime: AgentDeviceRuntime,
   options: CommandContext,
   resolved: ResolvedInteractionTarget,
-): Promise<SurfaceScopedNodes> {
+): Promise<{ baseline: SurfaceScopedNodes; baselineFresh: boolean }> {
   const session = await runtime.sessions.get(options.session ?? 'default');
   const frame = surfaceScopedNodes(session?.refFrameSnapshot);
+  const refFrame = resolved.kind === 'ref' ? frame : undefined;
   // A ref is authorized against the stored ref frame. Keep that visible presentation as the
   // transition baseline: a best-effort evidence recapture can recover through private AX and see
   // covered background controls that were not actionable when the ref was issued.
@@ -247,16 +260,21 @@ async function resolveSettleBaseline(
   // authoritative ref frame, so reuse it rather than silently turning a missing optional field
   // into an empty transition/diff baseline. Fall back to the latest observation for point targets
   // and pre-frame sessions. A candidate read in another view than the frame is skipped (#4486).
-  return postActionBaseline({
+  const baseline = await postActionBaseline({
     frame: withoutPresentedSurface(frame),
     candidates: [
-      resolved.kind === 'ref' ? frame : undefined,
+      refFrame,
       resolved.preAction,
       session?.refFrameSnapshot
         ? undefined
         : withoutPresentedSurface(surfaceScopedNodes(session?.snapshot)),
     ],
   });
+  // The ref frame a ref was authorized against, and the resolution's own capture, are the reads this
+  // action acted on. A stored tree reached as a fallback may predate a side effect.
+  const baselineFresh =
+    baseline.nodes.length > 0 && (baseline === refFrame || baseline === resolved.preAction);
+  return { baseline, baselineFresh };
 }
 
 /**

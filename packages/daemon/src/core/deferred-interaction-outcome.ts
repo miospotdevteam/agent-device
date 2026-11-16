@@ -3,7 +3,7 @@ import type { SettleObservation, SurfaceScopedNodes } from '@agent-device/contra
 import type { PostOpenObservation } from '@agent-device/contracts/application-lifecycle-runtime';
 import type { SnapshotCaptureAnnotations } from '@agent-device/contracts/capture';
 import { isApplePlatform, isMobilePlatform } from '@agent-device/kernel/device';
-import { formatRole, type SnapshotNode } from '@agent-device/kernel/snapshot';
+import { isBusyIndicatorNode, type SnapshotNode } from '@agent-device/kernel/snapshot';
 import type { SnapshotState } from '@agent-device/contracts/snapshot-model';
 import type { MovingTargetBaseline } from '@agent-device/contracts/runtime-contract';
 import {
@@ -267,14 +267,9 @@ function showsFirstScreen(nodes: readonly SnapshotNode[]): boolean {
     (node) =>
       !isViewportRootNode(node) &&
       Boolean(node.label?.trim() || node.value?.trim()) &&
-      !BUSY_INDICATOR_ROLES.has(formatRole(node.type ?? '')),
+      !isBusyIndicatorNode(node),
   );
 }
-
-const BUSY_INDICATOR_ROLES: ReadonlySet<string> = new Set([
-  'activity-indicator',
-  'progress-indicator',
-]);
 
 function clearSurfaceStabilization(session: SessionState | undefined): void {
   if (session?.deferredSurface?.kind !== 'stabilize') return;

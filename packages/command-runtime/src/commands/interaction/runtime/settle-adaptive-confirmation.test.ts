@@ -1,0 +1,182 @@
+import assert from 'node:assert/strict';
+import { test } from 'vitest';
+import type { SnapshotProvenance, SnapshotState } from '@agent-device/contracts/snapshot-model';
+import { makeSnapshotState } from '@agent-device/selectors/snapshot-geometry-fixtures';
+import { ref } from './selector-read-utils.ts';
+import { createSettleDevice, welcomeSnapshot } from './__tests__/settle-device-fixtures.ts';
+import {
+  elementCatalogTabSnapshot,
+  elementSettingsTabSnapshot,
+} from './stable-capture.fixtures.ts';
+
+// The internal adaptive confirmation prototype: a capture that differs from a fresh pre-action
+// baseline settles once one short confirmation agrees with it; every escalation keeps the quiet
+// window. Each case runs the same capture sequence with the switch on and off, so the difference
+// is the rule's and not the fixture's. Budgets run on the injected clock; captures cost nothing.
+
+const DEFAULT_QUIET_MS = 500;
+
+/** The welcome screen after a press relabels its heading in place: no broad replacement. */
+function relabeled(label = 'Welcome back!'): SnapshotState {
+  const base = welcomeSnapshot();
+  return {
+    ...base,
+    nodes: base.nodes.map((node) => (node.index === 0 ? { ...node, label } : node)),
+  };
+}
+
+function withProvenance<P extends SnapshotProvenance>(state: SnapshotState, provenance: P) {
+  return { ...state, ...provenance };
+}
+
+function withSpinner(snapshot: SnapshotState): SnapshotState {
+  return makeSnapshotState([
+    ...snapshot.nodes,
+    {
+      index: snapshot.nodes.length,
+      depth: 1,
+      parentIndex: 0,
+      type: 'ActivityIndicator',
+      label: 'In progress',
+      rect: { x: 10, y: 400, width: 20, height: 20 },
+    },
+  ]);
+}
+
+/**
+ * An @ref press on the stored tree, whose loop captures follow `loop` (the last one repeats). The
+ * native ref route captures nothing before the action, so the stored tree is the fresh baseline.
+ */
+async function press(params: {
+  stored?: SnapshotState;
+  loop: SnapshotState[];
+  adaptive: boolean;
+  target?: Parameters<ReturnType<typeof createSettleDevice>['interactions']['press']>[0];
+}) {
+  let captures = 0;
+  const device = createSettleDevice({
+    stored: params.stored ?? welcomeSnapshot(),
+    captureSnapshot: () => {
+      captures += 1;
+      return { snapshot: params.loop[Math.min(captures, params.loop.length) - 1]! };
+    },
+  });
+  const result = await device.interactions.press(params.target ?? ref('@e2'), {
+    session: 'default',
+    settle: params.adaptive ? { confirmation: 'adaptive' } : {},
+  });
+  assert.ok(result.settle);
+  return result.settle;
+}
+
+test('a changed capture that the next capture confirms settles before the quiet window', async () => {
+  const loop = [relabeled(), relabeled()];
+
+  const adaptive = await press({ loop, adaptive: true });
+  const quiet = await press({ loop, adaptive: false });
+
+  assert.equal(adaptive.settled, true);
+  assert.equal(adaptive.captures, 2);
+  assert.ok(adaptive.waitedMs < 200, `adaptive held ${adaptive.waitedMs}ms`);
+  assert.ok(adaptive.diff?.lines.some((line) => line.text.includes('Welcome back!')));
+  assert.equal(quiet.settled, true);
+  assert.ok(quiet.waitedMs >= DEFAULT_QUIET_MS, `quiet window held ${quiet.waitedMs}ms`);
+});
+
+test('a confirmation that disagrees falls back to the full quiet window', async () => {
+  const adaptive = await press({
+    loop: [relabeled('Loading'), relabeled('Welcome back!')],
+    adaptive: true,
+  });
+
+  assert.equal(adaptive.settled, true);
+  assert.ok(adaptive.waitedMs >= DEFAULT_QUIET_MS, `adaptive held ${adaptive.waitedMs}ms`);
+  assert.ok(adaptive.diff?.lines.some((line) => line.text.includes('Welcome back!')));
+});
+
+test('a capture that still matches the baseline keeps the quiet window', async () => {
+  const adaptive = await press({ loop: [welcomeSnapshot()], adaptive: true });
+
+  assert.equal(adaptive.settled, true);
+  assert.ok(adaptive.waitedMs >= DEFAULT_QUIET_MS, `adaptive held ${adaptive.waitedMs}ms`);
+});
+
+test('a change that arrives after an unchanged capture is confirmed on its own', async () => {
+  const adaptive = await press({
+    loop: [welcomeSnapshot(), relabeled(), relabeled()],
+    adaptive: true,
+  });
+
+  assert.equal(adaptive.settled, true);
+  assert.equal(adaptive.captures, 3);
+  assert.ok(adaptive.waitedMs < DEFAULT_QUIET_MS, `adaptive held ${adaptive.waitedMs}ms`);
+});
+
+test('a busy indicator on the changed screen keeps the quiet window', async () => {
+  const loop = [withSpinner(relabeled())];
+
+  const adaptive = await press({ loop, adaptive: true });
+
+  assert.equal(adaptive.settled, true);
+  assert.ok(adaptive.waitedMs >= DEFAULT_QUIET_MS, `adaptive held ${adaptive.waitedMs}ms`);
+});
+
+test('a confirmation from another producer keeps the quiet window', async () => {
+  const adaptive = await press({
+    loop: [
+      withProvenance(relabeled(), { backend: 'xctest', producer: 'apple-runner' }),
+      withProvenance(relabeled(), { backend: 'xctest', producer: 'appium-source' }),
+    ],
+    adaptive: true,
+  });
+
+  assert.equal(adaptive.settled, true);
+  assert.ok(adaptive.waitedMs >= DEFAULT_QUIET_MS, `adaptive held ${adaptive.waitedMs}ms`);
+});
+
+test('a presented surface the baseline did not show keeps the quiet window', async () => {
+  const adaptive = await press({
+    stored: { ...welcomeSnapshot(), presentedSurface: 'absent' },
+    loop: [{ ...relabeled(), presentedSurface: 'presented' }],
+    adaptive: true,
+  });
+
+  assert.equal(adaptive.settled, true);
+  assert.ok(adaptive.waitedMs >= DEFAULT_QUIET_MS, `adaptive held ${adaptive.waitedMs}ms`);
+});
+
+test('a broad replacement owed the confirmation floor keeps the floor', async () => {
+  const settings = elementSettingsTabSnapshot();
+
+  const adaptive = await press({
+    stored: { ...elementCatalogTabSnapshot(), presentedSurface: 'unknown' },
+    loop: [settings],
+    adaptive: true,
+    target: ref(`@${elementCatalogTabSnapshot().nodes.find((node) => node.ref)!.ref}`),
+  });
+
+  assert.equal(adaptive.settled, true);
+  assert.ok(adaptive.waitedMs >= 1_500, `adaptive lost the floor: ${adaptive.waitedMs}ms`);
+});
+
+test('a point press whose baseline is the stored tree keeps the quiet window', async () => {
+  // The pre-action evidence capture fails, so the baseline falls back to the stored tree, which may
+  // predate a side effect: a change against it does not prove the action's effect.
+  let captures = 0;
+  const device = createSettleDevice({
+    stored: welcomeSnapshot(),
+    captureSnapshot: () => {
+      captures += 1;
+      if (captures === 1) throw new Error('capture unavailable');
+      return { snapshot: relabeled() };
+    },
+  });
+
+  const result = await device.interactions.press(
+    { kind: 'point', x: 50, y: 100 },
+    { session: 'default', settle: { confirmation: 'adaptive' } },
+  );
+
+  assert.equal(result.settle?.settled, true);
+  assert.ok(result.settle.waitedMs >= DEFAULT_QUIET_MS, `held ${result.settle.waitedMs}ms`);
+});
