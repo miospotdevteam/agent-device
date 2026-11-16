@@ -31,9 +31,9 @@ A failed command can look like a fast success. Before you record the time of a c
 
 Use one session for each purpose. For more isolation, use a separate `--state-dir` under `/private/tmp`.
 Close each session that you opened manually, including failed attempts, with its original session, platform, UDID, and state directory.
-If this session's `open` booted a local simulator or emulator, use plain `close`.
-If daemon policy denies `device-shutdown`, inspect the warning.
-If a local device was already running, leave it running unless the user requests shutdown.
+If this session's `open` booted a local virtual device, use plain `close`.
+If policy denies `device-shutdown`, inspect the warning.
+Unless the user requests shutdown, keep prebooted local devices running.
 
 For `DEVICE_IN_USE`:
 
