@@ -1,7 +1,7 @@
 import type { DaemonResponse } from '@agent-device/kernel/contracts';
 import type { CommandFlags } from '@agent-device/contracts/command';
 import type { EnvMap } from '@agent-device/kernel/source-value';
-import { refFrameState } from '../../../core/ref-frame.ts';
+import { isOutdatedObservation, refFrameState, refFrameTree } from '../../../core/ref-frame.ts';
 import type { SessionState } from '../../../core/session-state.ts';
 import type { SettleParams } from '@agent-device/contracts/interaction';
 import { interactionErrorResponse } from './interaction-response.ts';
@@ -23,6 +23,20 @@ export function settleFlagGuardResponse(
 const ADAPTIVE_SETTLE_ENV = 'AGENT_DEVICE_SETTLE_ADAPTIVE';
 
 /**
+ * The frame still describes the screen: no side-effect seam expired it, and no native read marked
+ * its tree or the stored observation as predating a device change (`wait text`).
+ */
+function isRefFrameCurrent(session: SessionState): boolean {
+  const tree = refFrameTree(session);
+  return (
+    refFrameState(session) === 'active' &&
+    tree !== undefined &&
+    !isOutdatedObservation(tree) &&
+    (session.snapshot === undefined || !isOutdatedObservation(session.snapshot))
+  );
+}
+
+/**
  * The settle request a command carries. `host` selects the internal adaptive confirmation prototype
  * through the daemon host environment and nothing else. Read it before the action dispatches: the
  * dispatch expires the ref frame, and the prototype asks whether the frame was current before it.
@@ -39,7 +53,7 @@ export function readSettleRequest(
     ...(adaptive
       ? {
           confirmation: 'adaptive' as const,
-          refFrameCurrent: host.session !== undefined && refFrameState(host.session) === 'active',
+          refFrameCurrent: host.session !== undefined && isRefFrameCurrent(host.session),
         }
       : {}),
   };
