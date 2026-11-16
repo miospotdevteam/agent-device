@@ -207,7 +207,12 @@ It adds no state name, command, or flag:
   A batch whose steps would close an armed remote recording is refused before any step runs (`remote_script_batch_close_unsupported`), because a batch delivers no script versions from its steps.
 - The daemon reports the `script-artifacts` capability in `/health`, through a proxy in its upstream health; the client refuses a remote `--save-script` before dispatch without it.
 
-The destination keeps local `--save-script` semantics: the client creates a missing parent directory and checks no ancestor ownership, so another local user who can write an ancestor directory can redirect the file, locally and remotely alike (#4565).
+The destination keeps local `--save-script` semantics (#4565): the client creates a missing parent directory, and neither the daemon nor the client publishes through a directory another local user can write.
+Before staging, and again immediately before the link or rename, the publisher walks each component of the destination with `lstat` and refuses it under a typed reason when its mode is writable by group or other without the sticky bit, unless that group is the current user's own private group: Ubuntu and Debian set up every home directory that way, often group-writable, and those keep working.
+A symbolic link whose own directory others can create entries in is refused whatever it points at, because that link may be one they planted; the sticky bit does not excuse it, because it guards entries that already exist.
+The publisher also captures the destination directory's identity before it stages the file and compares it before publishing, so a parent swapped out by name during the download or the temp write never receives the script.
+Node exposes no `openat` or `renameat`, so publishing relative to a verified directory handle is not available without native code; the refusal plus the identity re-check is the non-native rule that closes the same window.
+A local write fails with `script_ancestor_untrusted` or `script_ancestry_replaced`; a remote version keeps its command's success and carries that reason as the `scriptDeliveryFailure` cause.
 Every result that can carry a script version discloses a failed delivery: the SDK result, the CLI human output and `--json`, and the MCP tool result each carry `scriptDeliveryFailure` and the warning, so no caller reads a stale file as current.
 Known limitation (#4595): a batch delivers no script versions from its steps, so closing an armed remote recording inside a batch stays refused.
 Rejected: a remote `session save-script` download, because it added a second publication path and a retry protocol.
