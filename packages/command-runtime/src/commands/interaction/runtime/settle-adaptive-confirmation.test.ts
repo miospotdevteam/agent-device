@@ -180,3 +180,24 @@ test('a point press whose baseline is the stored tree keeps the quiet window', a
   assert.equal(result.settle?.settled, true);
   assert.ok(result.settle.waitedMs >= DEFAULT_QUIET_MS, `held ${result.settle.waitedMs}ms`);
 });
+
+test('a capture that holds the baseline beside a new screen keeps the quiet window', async () => {
+  // A navigation transition can publish both screens at once and hold that union across captures.
+  const base = welcomeSnapshot();
+  const union = makeSnapshotState([
+    ...base.nodes,
+    ...['Detail', 'Buy', 'Share'].map((label, offset) => ({
+      index: base.nodes.length + offset,
+      depth: 1,
+      parentIndex: 0,
+      type: 'Button',
+      label,
+      rect: { x: 200, y: 20 + offset * 60, width: 100, height: 40 },
+    })),
+  ]);
+
+  const adaptive = await press({ loop: [union], adaptive: true });
+
+  assert.equal(adaptive.settled, true);
+  assert.ok(adaptive.waitedMs >= DEFAULT_QUIET_MS, `adaptive held ${adaptive.waitedMs}ms`);
+});
