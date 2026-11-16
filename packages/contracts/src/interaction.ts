@@ -307,6 +307,11 @@ export type SettleParams = {
    * host environment opts in (AGENT_DEVICE_SETTLE_ADAPTIVE=1).
    */
   confirmation?: 'adaptive';
+  /**
+   * With `confirmation`: the session's ref frame had crossed no side-effect seam when the action
+   * began, so a baseline taken from it describes the screen right before the action.
+   */
+  refFrameCurrent?: boolean;
 };
 
 /**

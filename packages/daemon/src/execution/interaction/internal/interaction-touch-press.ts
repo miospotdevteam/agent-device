@@ -118,7 +118,7 @@ function buildTargetedRuntimeOptions(
         requestId: req.meta?.requestId,
         clickButton: admitted.clickButton,
         flags: req.flags,
-        settle: readSettleRequest(req.flags, params.sessionStore.host.env),
+        settle: readSettleRequest(req.flags, { env: params.sessionStore.host.env, session }),
         durationMs,
         expectedResolvedTarget: req.internal?.replayTargetGuard,
         preresolvedTarget: req.internal?.findResolvedTarget,

@@ -92,7 +92,7 @@ export async function settleAfterInteraction(
 ): Promise<SettleOutcome> {
   return await settleAfterAction(runtime, options, {
     ...params,
-    ...(await resolveSettleBaseline(runtime, options, params.resolved)),
+    ...(await resolveSettleBaseline(runtime, options, params.resolved, params.refFrameCurrent)),
     actionPoint: params.resolved.point,
   });
 }
@@ -249,6 +249,7 @@ async function resolveSettleBaseline(
   runtime: AgentDeviceRuntime,
   options: CommandContext,
   resolved: ResolvedInteractionTarget,
+  refFrameCurrent: boolean | undefined,
 ): Promise<{ baseline: SurfaceScopedNodes; baselineFresh: boolean }> {
   const session = await runtime.sessions.get(options.session ?? 'default');
   const frame = surfaceScopedNodes(session?.refFrameSnapshot);
@@ -270,10 +271,14 @@ async function resolveSettleBaseline(
         : withoutPresentedSurface(surfaceScopedNodes(session?.snapshot)),
     ],
   });
-  // The ref frame a ref was authorized against, and the resolution's own capture, are the reads this
-  // action acted on. A stored tree reached as a fallback may predate a side effect.
+  // The ref frame a ref was authorized against, the resolution's own capture, and a frame no side
+  // effect has crossed describe the screen this action acted on. A stored tree reached as a fallback
+  // may predate a side effect.
   const baselineFresh =
-    baseline.nodes.length > 0 && (baseline === refFrame || baseline === resolved.preAction);
+    baseline.nodes.length > 0 &&
+    (baseline === refFrame ||
+      baseline === resolved.preAction ||
+      (refFrameCurrent === true && baseline.nodes === frame.nodes));
   return { baseline, baselineFresh };
 }
 

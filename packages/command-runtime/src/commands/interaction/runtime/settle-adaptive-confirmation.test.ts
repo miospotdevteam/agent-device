@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'vitest';
 import type { SnapshotProvenance, SnapshotState } from '@agent-device/contracts/snapshot-model';
 import { makeSnapshotState } from '@agent-device/selectors/snapshot-geometry-fixtures';
-import { ref } from './selector-read-utils.ts';
+import { ref, selector } from './selector-read-utils.ts';
 import { createSettleDevice, welcomeSnapshot } from './__tests__/settle-device-fixtures.ts';
 import {
   elementCatalogTabSnapshot,
@@ -201,3 +201,31 @@ test('a capture that holds the baseline beside a new screen keeps the quiet wind
   assert.equal(adaptive.settled, true);
   assert.ok(adaptive.waitedMs >= DEFAULT_QUIET_MS, `adaptive held ${adaptive.waitedMs}ms`);
 });
+
+for (const [label, refFrameCurrent, early] of [
+  ['a frame no side effect crossed is a fresh baseline', true, true],
+  ['a frame the daemon reports outdated keeps the quiet window', false, false],
+] as const) {
+  test(`a selector press read in another view than the frame: ${label}`, async () => {
+    // The resolution capture carries no presentation, the frame is interactive-only, so the settle
+    // baseline is the frame itself and only the daemon can say whether it is current.
+    const frame = { ...welcomeSnapshot(), presentation: { interactiveOnly: true } };
+    let captures = 0;
+    const device = createSettleDevice({
+      stored: frame,
+      refFrame: frame,
+      captureSnapshot: () => {
+        captures += 1;
+        return { snapshot: captures === 1 ? welcomeSnapshot() : relabeled() };
+      },
+    });
+
+    const result = await device.interactions.press(selector('label=Next'), {
+      session: 'default',
+      settle: { confirmation: 'adaptive', refFrameCurrent },
+    });
+
+    assert.equal(result.settle?.settled, true);
+    assert.equal(result.settle.waitedMs < DEFAULT_QUIET_MS, early, `${result.settle.waitedMs}ms`);
+  });
+}

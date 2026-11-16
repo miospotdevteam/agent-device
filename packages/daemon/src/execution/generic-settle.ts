@@ -90,7 +90,10 @@ export async function planGenericSettleObservation(
   if (!commandSupportsSettleObservation(params.command)) return {};
   const invalidSettleFlags = settleFlagGuardResponse(params.command, params.flags);
   if (invalidSettleFlags) return { response: invalidSettleFlags };
-  const settle = readSettleRequest(params.flags, params.sessionStore.host.env);
+  const settle = readSettleRequest(params.flags, {
+    env: params.sessionStore.host.env,
+    session: params.session,
+  });
   if (!settle) return {};
   const { presentedSurface: _unverified, ...frame } = surfaceScopedNodes(
     refFrameTree(params.session),
